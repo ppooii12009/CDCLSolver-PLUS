@@ -1,27 +1,33 @@
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 子句类
  */
-public class Clause implements Serializable, Comparable<Clause>
+public class Clause implements Serializable
 {
     private List<Integer> literals;
     private Boolean value;
     private int index;
-    // 未赋值的文字数量
-    private int unassignedNumber;
-
-    // 该子句为单位子句时有效
-    // 未赋值的唯一文字
-    private int unitLiteral;
+    // 监视变量(watched literal)
+    private int w1 = 0;
+    private int w2 = 0;
 
     public Clause()
     {
         literals = new ArrayList<>();
         value = null;
-        unassignedNumber = 0;
+        w1 = 0;
+        w2 = 0;
+    }
+
+    public void swapW()
+    {
+        int t = w1;
+        w1 = w2;
+        w2 = t;
     }
 
     @Override
@@ -42,14 +48,19 @@ public class Clause implements Serializable, Comparable<Clause>
         return s.toString();
     }
 
-    public void addOneToUnassignedNumber()
+    @Override
+    public boolean equals(Object o)
     {
-        this.unassignedNumber++;
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Clause clause = (Clause) o;
+        return index == clause.index;
     }
 
-    public void minusOneToUnassignedNumber()
+    @Override
+    public int hashCode()
     {
-        this.unassignedNumber--;
+        return Objects.hash(index);
     }
 
     public List<Integer> getLiterals()
@@ -82,37 +93,23 @@ public class Clause implements Serializable, Comparable<Clause>
         this.index = index;
     }
 
-    public int getUnitLiteral()
+    public int getW1()
     {
-        return unitLiteral;
+        return w1;
     }
 
-    public void setUnitLiteral(int unitLiteral)
+    public void setW1(int w1)
     {
-        this.unitLiteral = unitLiteral;
+        this.w1 = w1;
     }
 
-    public int getUnassignedNumber()
+    public int getW2()
     {
-        return unassignedNumber;
+        return w2;
     }
 
-    public void setUnassignedNumber(int unassignedNumber)
+    public void setW2(int w2)
     {
-        this.unassignedNumber = unassignedNumber;
-    }
-
-    @Override
-    public int compareTo(Clause o)
-    {
-        if (this.unassignedNumber < o.unassignedNumber)
-        {
-            return -1;
-        }
-        if (this.unassignedNumber == o.unassignedNumber)
-        {
-            return Integer.compare(this.getLiterals().size() - this.unassignedNumber, o.getLiterals().size() - o.unassignedNumber);
-        }
-        return 1;
+        this.w2 = w2;
     }
 }

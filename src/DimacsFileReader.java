@@ -72,7 +72,6 @@ public class DimacsFileReader
                             literals.add(l);
                         }
                         clause.setLiterals(literals);
-                        clause.setUnassignedNumber(literals.size());
                         clause.setIndex(i);
                         clauses.add(clause);
                     }

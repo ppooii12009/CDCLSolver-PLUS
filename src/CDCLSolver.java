@@ -16,12 +16,22 @@ public class CDCLSolver
 
     private Trail trail;
 
+    private Map<Integer, Set<Clause>> watchedList;
+
+    private Queue<Clause> unitClauses;
+
+    // 包含文字key的子句
+    private Map<Integer, Set<Clause>> includedClause;
+
     public CDCLSolver()
     {
         cnf = null;
         literalNumber = 0;
         assignments = new HashMap<>();
         trail = new Trail();
+        watchedList = new HashMap<>();
+        unitClauses = new ArrayDeque<>();
+        includedClause = new HashMap<>();
     }
 
     public CDCLSolver(CNF cnf)
@@ -42,6 +52,8 @@ public class CDCLSolver
             for (Integer literal :
                     literals)
             {
+                includedClause.putIfAbsent(literal, new HashSet<>());
+                includedClause.get(literal).add(c);
                 literalSet.add(literal > 0 ? literal : -literal);
             }
         }
@@ -50,6 +62,26 @@ public class CDCLSolver
                 literalSet)
         {
             assignments.put(literal, null);
+            watchedList.put(literal, new HashSet<>());
+            watchedList.put(-literal, new HashSet<>());
+        }
+
+        // 设置默认watched literal
+        for (Clause c :
+                clauses)
+        {
+            List<Integer> literals = c.getLiterals();
+            if (literals.size() == 1)
+            {
+                unitClauses.add(c);
+                continue;
+            }
+            int w1 = literals.get(0);
+            int w2 = literals.get(1);
+            c.setW1(w1);
+            c.setW2(w2);
+            watchedList.get(w1).add(c);
+            watchedList.get(w2).add(c);
         }
     }
 
@@ -70,23 +102,60 @@ public class CDCLSolver
 
 
     // 对文字赋值
-    public void setLiteralAssignment(int literal)
-    {
-        this.setLiteralAssignment(literal, true);
-    }
-
-    // 对文字赋值
     public void setLiteralAssignment(int literal, boolean assignment)
     {
         int abs = Math.abs(literal);
         assignments.put(abs, (literal > 0) == assignment);
-        for (Clause clause :
-                cnf.getClauses())
+        // 处理值为true的子句
+        if (!assignment)
         {
-            if (clause.getLiterals().contains(literal) || clause.getLiterals().contains(-literal))
+            literal = -literal;
+        }
+        for (Clause c :
+                includedClause.get(literal))
+        {
+            c.setValue(true);
+        }
+        // 处理watched literals
+        literal = -literal;
+
+        Clause[] literalWatchedClauses = new Clause[0];
+        literalWatchedClauses = watchedList.get(literal).toArray(literalWatchedClauses);
+        int size = literalWatchedClauses.length;
+        for (Clause c :
+                literalWatchedClauses)
+        {
+            List<Integer> literals = c.getLiterals();
+            if (literal == c.getW1())
             {
-                clause.addOneToUnassignedNumber();
+                c.swapW();
             }
+
+            int newWatchedLiteral = c.getW1();
+            // 寻找新的 watched literal
+            for (Integer l :
+                    literals)
+            {
+                // 未被赋值的文字
+                if (assignments.get(l) == null)
+                {
+                    if (l != c.getW1())
+                    {
+                        newWatchedLiteral = l;
+                        break;
+                    }
+                }
+            }
+            // 仍然保留至少2个未赋值变量 替换新的 watched literal
+            if (newWatchedLiteral != c.getW1())
+            {
+                c.setW2(newWatchedLiteral);
+                watchedList.get(newWatchedLiteral).add(c);
+            } else // 仅剩一个未赋值变量, 出现单位子句 W1为被蕴含(必须为真)的文字
+            {
+                unitClauses.add(c);
+            }
+            watchedList.get(literal).remove(c);
         }
     }
 
@@ -94,54 +163,6 @@ public class CDCLSolver
     public void clearAssignment(int literal)
     {
         assignments.put(Math.abs(literal), null);
-        for (Clause clause :
-                cnf.getClauses())
-        {
-            if (clause.getLiterals().contains(literal) || clause.getLiterals().contains(-literal))
-            {
-                clause.minusOneToUnassignedNumber();
-            }
-        }
-    }
-
-    // 寻找单位子句
-    public Clause findUnitClause()
-    {
-        for (Clause clause :
-                cnf.getClauses())
-        {
-            if (clause.getLiterals().isEmpty())
-            {
-                continue;
-            }
-
-            int number_false = 0;
-            int number_undefined = 0;
-            int unitLiteral = 0;
-            for (Integer literal :
-                    clause.getLiterals())
-            {
-                Boolean assignment = this.getLiteralAssignment(literal);
-                if (assignment == null)
-                {
-                    unitLiteral = literal;
-                    number_undefined++;
-                } else if (!assignment)
-                {
-                    number_false++;
-                }
-            }
-
-            // 找到单位子句
-            if (number_false == clause.getLiterals().size() - 1 && number_undefined == 1)
-            {
-                clause.setUnitLiteral(unitLiteral);
-                return clause;
-            }
-        }
-
-        // 没有单位子句
-        return null;
     }
 
     // 更新子句真值
@@ -178,6 +199,17 @@ public class CDCLSolver
             {
                 clause.setValue(false);
             }
+
+            // 若子句真值待定, 重新设定watched literals
+            if (clause.getValue() == null)
+            {
+                watchedList.get(clause.getW1()).add(clause);
+                // 若W2未被赋值 保持watched状态
+                if (assignments.get(clause.getW2()) == null)
+                {
+                    watchedList.get(clause.getW2()).add(clause);
+                }
+            }
         }
     }
 
@@ -197,16 +229,22 @@ public class CDCLSolver
     // 单位子句传播
     public void unitPropagation()
     {
-        Integer literal = null;
-        while (true)
+        while (!unitClauses.isEmpty())
         {
-            Clause clause = this.findUnitClause();
-            if (clause == null)
+            Clause clause = unitClauses.remove();
+            // 检查当前子句是否已满足或冲突
+            if (clause.getValue() == null)
             {
+                this.propagateLiteral(clause.getW1(), clause.getIndex());
+            } else if (clause.getValue())
+            {
+                continue;
+            } else
+            {
+                // 出现冲突 清空单位子句 退出
+                unitClauses.clear();
                 break;
             }
-
-            this.propagateLiteral(clause.getUnitLiteral(), clause.getIndex());
         }
     }
 
@@ -472,6 +510,7 @@ public class CDCLSolver
         }
 
         // 加入学习到的新子句
+        // TODO 新子句的 watched literals 设置
         Clause learnedClause = new Clause();
         List<Integer> learnedLiterals = new ArrayList<>();
         for (Node node :
@@ -521,7 +560,6 @@ public class CDCLSolver
         while (true)
         {
             System.out.println("Round" + r++);
-            //Collections.sort(this.getCnf().getClauses());
             // 单位传播
             this.unitPropagation();
             Clause conflictClause = this.detectConflict();

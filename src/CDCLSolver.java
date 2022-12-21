@@ -26,6 +26,12 @@ public class CDCLSolver
     // 历史赋值记录
     Set<String> assignmentsHistory;
 
+    // VSIDS 计数器
+    private Map<Integer, Double> counter;
+
+    // VSIDS 计数器常数
+    private final double alpha = 1.05;
+
     public CDCLSolver()
     {
         cnf = null;
@@ -36,6 +42,7 @@ public class CDCLSolver
         unitClauses = new ArrayDeque<>();
         includedClause = new HashMap<>();
         assignmentsHistory = new HashSet<>();
+        counter = new HashMap<>();
     }
 
     public CDCLSolver(CNF cnf)
@@ -56,6 +63,9 @@ public class CDCLSolver
             for (Integer literal :
                     literals)
             {
+                counter.putIfAbsent(literal, (double) 0);
+                counter.putIfAbsent(-literal, (double) 0);
+                counter.put(literal, counter.get(literal) + 1);
                 includedClause.putIfAbsent(literal, new HashSet<>());
                 includedClause.get(literal).add(c);
                 literalSet.add(literal > 0 ? literal : -literal);
@@ -298,10 +308,15 @@ public class CDCLSolver
     // 寻找未赋值的文字
     public Integer findUnassignedLiteral()
     {
-        Set<Integer> literals = this.getAssignments().keySet();
-        for (Integer literal :
-                literals)
+        LinkedHashMap<Integer, Double> sortedMap = new LinkedHashMap<>();
+        counter.entrySet().stream()
+                .sorted(Map.Entry.<Integer, Double>comparingByValue().reversed())
+                .forEachOrdered(e -> sortedMap.put(e.getKey(), e.getValue()));
+
+        for (Map.Entry<Integer,Double> e:
+             sortedMap.entrySet())
         {
+            Integer literal = e.getKey();
             if (this.getAssignments().get(literal) == null)
             {
                 this.setLiteralAssignment(literal, true);
@@ -309,14 +324,7 @@ public class CDCLSolver
                 {
                     return literal;
                 }
-                this.setLiteralAssignment(literal, false);
-                if (!this.checkIfAlreadyTried())
-                {
-                    return -literal;
-                }
                 this.clearAssignment(literal);
-                // 应当回溯
-                return 0;
             }
         }
 
@@ -560,6 +568,7 @@ public class CDCLSolver
             w2 = w1;
             w1 = -node.getLiteral();
             learnedLiterals.add(w1);
+            counter.put(w1, counter.get(w1) + 1);
         }
         if (w2 == 0)
         {
@@ -597,6 +606,16 @@ public class CDCLSolver
         }
     }
 
+    // VSIDS 计数器除以常数
+    public void divideCounter()
+    {
+        for (Integer literal :
+                counter.keySet())
+        {
+            counter.put(literal, counter.get(literal) / alpha);
+        }
+    }
+
     // 主函数
     public void solve()
     {
@@ -607,9 +626,16 @@ public class CDCLSolver
         }
 
         int r = 1;
+        int clock = 0;
         while (true)
         {
             System.out.println("Round" + r++);
+            // VSIDS 计数器自除
+            clock++;
+            if (clock % 50 == 0)
+            {
+                this.divideCounter();
+            }
             // 单位传播
             this.unitPropagation();
             Clause conflictClause = this.detectConflict();
@@ -705,5 +731,15 @@ public class CDCLSolver
     public void setTrail(Trail trail)
     {
         this.trail = trail;
+    }
+
+    public Map<Integer, Double> getCounter()
+    {
+        return counter;
+    }
+
+    public void setCounter(Map<Integer, Double> counter)
+    {
+        this.counter = counter;
     }
 }

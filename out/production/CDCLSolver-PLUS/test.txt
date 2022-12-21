@@ -1,6 +1,6 @@
 c SAT09-Contest Parameters: unif k=7 r=89 v=60 c=5340 seed=178043354
 c Uniform UNKNOWN KSAT Instance k=7, nbc=5340, nbv=60, seed=178043354
-p cnf 60 2000
+p cnf 60 1200
 -2 50 -44 -25 27 22 -3 0
 60 -11 59 -28 35 18 -2 0
 -14 -15 5 11 -35 57 20 0

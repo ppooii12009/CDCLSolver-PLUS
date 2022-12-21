@@ -23,6 +23,9 @@ public class CDCLSolver
     // 包含文字key的子句
     private Map<Integer, Set<Clause>> includedClause;
 
+    // 历史赋值记录
+    Set<String> assignmentsHistory;
+
     public CDCLSolver()
     {
         cnf = null;
@@ -32,6 +35,7 @@ public class CDCLSolver
         watchedList = new HashMap<>();
         unitClauses = new ArrayDeque<>();
         includedClause = new HashMap<>();
+        assignmentsHistory = new HashSet<>();
     }
 
     public CDCLSolver(CNF cnf)
@@ -40,9 +44,9 @@ public class CDCLSolver
         putCNF(cnf);
     }
 
-    public void putCNF(CNF cnf)
+    public void putCNF(CNF originCnf)
     {
-        this.cnf = CloneUtils.clone(cnf);
+        this.cnf = CloneUtils.clone(originCnf);
         Set<Integer> literalSet = new HashSet<>();
         List<Clause> clauses = cnf.getClauses();
         for (Clause c :
@@ -111,17 +115,20 @@ public class CDCLSolver
         {
             literal = -literal;
         }
-        for (Clause c :
-                includedClause.get(literal))
+        if (includedClause.containsKey(literal))
         {
-            c.setValue(true);
+            for (Clause c :
+                    includedClause.get(literal))
+            {
+                c.setValue(true);
+            }
         }
+
         // 处理watched literals
         literal = -literal;
 
         Clause[] literalWatchedClauses = new Clause[0];
         literalWatchedClauses = watchedList.get(literal).toArray(literalWatchedClauses);
-        int size = literalWatchedClauses.length;
         for (Clause c :
                 literalWatchedClauses)
         {
@@ -267,6 +274,27 @@ public class CDCLSolver
         return null;
     }
 
+    // 检查当前赋值组合是否已经尝试过
+    public boolean checkIfAlreadyTried()
+    {
+        // 检查是否已经尝试过同样的赋值
+        StringBuilder a = new StringBuilder();
+        Set<Integer> keySets = new TreeSet<>(assignments.keySet());
+        for (Integer key :
+                keySets)
+        {
+            Boolean t = assignments.get(key);
+            if (t == null)
+            {
+                a.append("null");
+            } else
+            {
+                a.append(t ? 1 : 0);
+            }
+        }
+        return !assignmentsHistory.add(a.toString());
+    }
+
     // 寻找未赋值的文字
     public Integer findUnassignedLiteral()
     {
@@ -276,7 +304,19 @@ public class CDCLSolver
         {
             if (this.getAssignments().get(literal) == null)
             {
-                return literal;
+                this.setLiteralAssignment(literal, true);
+                if (!this.checkIfAlreadyTried())
+                {
+                    return literal;
+                }
+                this.setLiteralAssignment(literal, false);
+                if (!this.checkIfAlreadyTried())
+                {
+                    return -literal;
+                }
+                this.clearAssignment(literal);
+                // 应当回溯
+                return 0;
             }
         }
 
@@ -308,7 +348,7 @@ public class CDCLSolver
         lastLevelNodes_star.add(conflictNode);
 
         // 所有节点集合
-        Set<Node> V = new HashSet<>();
+        Set<Node> V = new LinkedHashSet<>();
         for (int i = 0; i <= trail.getCurrentLevel(); i++)
         {
             List<Node> nodes = trail.getNodes().get(i);
@@ -461,7 +501,7 @@ public class CDCLSolver
         A.removeAll(B);
 
         // 原因集
-        Set<Node> R = new HashSet<>();
+        Set<Node> R = new LinkedHashSet<>();
         // 所有节点的邻接表
         Map<Node, List<Node>> entireAdjacencyList = new HashMap<>();
         for (Node node :
@@ -510,14 +550,24 @@ public class CDCLSolver
         }
 
         // 加入学习到的新子句
-        // TODO 新子句的 watched literals 设置
         Clause learnedClause = new Clause();
         List<Integer> learnedLiterals = new ArrayList<>();
+        int w1 = 0;
+        int w2 = 0;
         for (Node node :
                 R)
         {
-            learnedLiterals.add(-node.getLiteral());
+            w2 = w1;
+            w1 = -node.getLiteral();
+            learnedLiterals.add(w1);
         }
+        if (w2 == 0)
+        {
+            w2 = w1;
+        }
+        learnedClause.setW1(w1);
+        learnedClause.setW2(w2);
+
         learnedClause.setLiterals(learnedLiterals);
         this.getCnf().addClause(learnedClause);
 
@@ -584,6 +634,17 @@ public class CDCLSolver
                 if (literal == null)
                 {
                     return;
+                } else if (literal == 0)
+                {
+                    // 回溯
+                    // 在决策层0发现冲突说明不可满足
+                    if (this.getTrail().getCurrentLevel() == 0)
+                    {
+                        System.out.println("unable to satisfy");
+                        return;
+                    }
+                    this.backtrack(this.getTrail().getCurrentLevel() - 1);
+                    this.updateClauseValue();
                 } else
                 {
                     // 开始一个新的决策层
@@ -597,10 +658,11 @@ public class CDCLSolver
     // 输出求解结果
     public void outputSolution()
     {
-        Set<Integer> keySets = assignments.keySet();
+        Set<Integer> keySets = new TreeSet<>(assignments.keySet());
         for (Integer key :
                 keySets)
         {
+            assignments.putIfAbsent(key, true);
             System.out.println("X" + key + ": " + assignments.get(key));
         }
     }
